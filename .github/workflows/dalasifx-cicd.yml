@@ -1,0 +1,131 @@
+
+name: DalasiFX CI/CD
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "app.py"
+      - "config.py"
+      - "database.py"
+      - "services/**"
+      - "templates/**"
+      - "static/**"
+      - "tests/**"
+      - "Dockerfile"
+      - "k8s/deployment.yaml"
+      - ".github/workflows/dalasifx-cicd.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dalasifx-production
+  cancel-in-progress: false
+
+env:
+  ACR_NAME: ghostacr77
+  IMAGE_NAME: dalasisfx
+  RESOURCE_GROUP: ghost-rg
+  AKS_CLUSTER: ghost-aks77
+
+jobs:
+  test:
+    name: Test application
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run tests
+        run: python -m pytest -q
+
+  build-and-deploy:
+    name: Build, push and deploy
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Set image tag
+        run: |
+          echo "IMAGE=${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${GITHUB_SHA}" >> "$GITHUB_ENV"
+
+      - name: Build Docker image
+        run: |
+          docker build --pull -t "$IMAGE" .
+
+      - name: Login to ACR
+        run: az acr login --name "$ACR_NAME"
+
+      - name: Push image to ACR
+        run: docker push "$IMAGE"
+
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$AKS_CLUSTER" \
+            --overwrite-existing
+
+      - name: Update Deployment manifest
+        run: |
+          python -m pip install PyYAML
+          python - <<'PY'
+          import os
+          import yaml
+
+          path = "k8s/deployment.yaml"
+          with open(path, encoding="utf-8") as f:
+              doc = yaml.safe_load(f)
+
+          if doc.get("kind") != "Deployment":
+              raise SystemExit(f"{path} is not a Deployment manifest")
+
+          if doc.get("metadata", {}).get("name") != "dalasisfx":
+              raise SystemExit("Unexpected Deployment name; refusing to deploy")
+
+          containers = doc.get("spec", {}).get("template", {}).get(
+              "spec", {}
+          ).get("containers", [])
+
+          if len(containers) != 1:
+              raise SystemExit(
+                  "Expected exactly one container in dalasisfx Deployment"
+              )
+
+          containers[0]["image"] = os.environ["IMAGE"]
+
+          with open(path, "w", encoding="utf-8") as f:
+              yaml.safe_dump(doc, f, sort_keys=False)
+          PY
+
+      - name: Apply Deployment manifest
+        run: kubectl apply -f k8s/deployment.yaml
+
+      - name: Verify rollout
+        run: |
+          kubectl rollout status deployment/dalasisfx --timeout=180s
+          kubectl get deployment dalasisfx
+          kubectl get pods -o wide
