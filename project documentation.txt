@@ -1,0 +1,421 @@
+# DalasiFX — Azure AKS Deployment and Troubleshooting Documentation
+
+## 1. Project Overview
+
+**Project:** DalasiFX — Real-Time Currency Converter  
+**Application:** Python Flask web application  
+**Purpose:** Convert currencies using exchange-rate data, with support for currency metadata, popular exchange rates, historical rates, and rate trends.  
+**Containerization:** Docker  
+**Container Registry:** Azure Container Registry (ACR)  
+**Orchestration:** Azure Kubernetes Service (AKS)  
+**Ingress Controller:** Traefik  
+**Infrastructure:** Existing Azure environment; no new cluster or public IP required for this deployment.
+
+The objective was to deploy DalasiFX alongside an existing personal portfolio website, using the same public IP address while ensuring the application’s HTML, CSS, JavaScript, and API endpoints worked correctly.
+
+## 2. Azure and Kubernetes Environment
+
+| Component | Configuration |
+|---|---|
+| Azure resource group | `ghost-rg` |
+| AKS cluster | `ghost-aks77` |
+| Azure region | `eastus2` |
+| Azure Container Registry | `ghostacr77.azurecr.io` |
+| Application image repository | `dalasisfx` |
+| AKS node resource group | `MC_ghost-rg_ghost-aks77_eastus2` |
+| Kubernetes namespace | `default` |
+| Traefik namespace | `traefik` |
+| Public IP address | `20.22.151.118` |
+| Application URL | `http://20.22.151.118/dalasisfx/` |
+| Portfolio URL | `http://20.22.151.118/` |
+
+**Important:** The existing AKS cluster, Traefik LoadBalancer, public IP, portfolio deployment, and Terraform-managed infrastructure were to remain unchanged.
+
+## 3. Deployment Architecture
+
+The request flow is:
+
+1. A visitor opens the public IP address in a browser.
+2. Traefik receives the HTTP request.
+3. The Ingress rules select the portfolio or DalasiFX service based on the URL path.
+4. For DalasiFX, the middleware removes the `/dalasisfx` prefix.
+5. The request is forwarded to the DalasiFX Kubernetes Service.
+6. The Service forwards the request to the Flask application container, which listens on port `5000`.
+
+### Application routing
+
+- Portfolio: `/` → `my-portfolio` Service.
+- DalasiFX: `/dalasisfx/` → `dalasisfx` Service.
+- DalasiFX static files: `/dalasisfx/static/...`
+- DalasiFX API: `/dalasisfx/api/...`
+
+The public IP is shared by both applications through Traefik. A second LoadBalancer or public IP is not needed for this routing design.
+
+## 4. Kubernetes Resources
+
+The existing environment includes these resources:
+
+- `Deployment/dalasisfx`
+- `Service/dalasisfx`
+- `Deployment/my-portfolio`
+- `Service/my-portfolio`
+- `Ingress/dalasisfx-ingress`
+- `Ingress/ghost-apps-ingress`
+- `Middleware/dalasisfx-strip-prefix`
+- Traefik Service in the `traefik` namespace
+
+The DalasiFX Service is a ClusterIP Service with port `80` forwarding to the Flask container’s port `5000`.
+
+### Traefik strip-prefix middleware
+
+The middleware was configured to remove `/dalasisfx` before forwarding requests to Flask.
+
+```yaml
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: dalasisfx-strip-prefix
+  namespace: default
+spec:
+  stripPrefix:
+    prefixes:
+      - /dalasisfx
+```
+
+The DalasiFX Ingress references this middleware through the annotation:
+
+```yaml
+traefik.ingress.kubernetes.io/router.middlewares: default-dalasisfx-strip-prefix@kubernetescrd
+```
+
+This lets the browser use a public URL containing `/dalasisfx` while the Flask application receives paths such as `/`, `/static/css/style.css`, and `/api/convert`.
+
+**Operational note:** Keep the Ingress, middleware, and Service configuration consistent. Avoid changing the portfolio Ingress when troubleshooting DalasiFX.
+
+## 5. Problems Identified and Fixes
+
+### 5.1 Container build context
+
+An early Docker build failed with an error indicating that Docker could not find a `Dockerfile` in the current directory.
+
+```text
+failed to read dockerfile: open Dockerfile: no such file or directory
+```
+
+The push then failed because the expected local image tag had not been created.
+
+**Lesson:** Run Docker commands from the application project directory containing the Dockerfile. Confirm the working directory and file layout before building.
+
+Useful checks:
+
+```bash
+pwd
+ls
+```
+
+On Windows Command Prompt, use `cd` and `dir` if those are more convenient.
+
+### 5.2 Stale container image
+
+The application was previously deployed using an image tag such as `v1`. That tag was subsequently deleted from ACR, and the running pod could still have been using a cached image.
+
+**Lesson:** Use a new image tag for each application release rather than relying on a deleted tag or a potentially cached image.
+
+The `v3` tag was proposed for the corrected build. Verify the final tag actually pushed to ACR and deployed in AKS before recording it as the production release.
+
+### 5.3 Static files and application subpath
+
+DalasiFX needed to run under `/dalasisfx/` instead of at the web server root.
+
+The HTML template originally used Flask's `url_for()` for static resources. The troubleshooting work moved toward using a base URL for the application subpath.
+
+The intended template pattern was:
+
+```html
+<head>
+  <base href="/dalasisfx/">
+  <link rel="stylesheet" href="static/css/style.css">
+</head>
+```
+
+The JavaScript file was loaded using:
+
+```html
+<script src="static/js/app.js"></script>
+```
+
+This allows relative resource URLs to resolve under `/dalasisfx/`.
+
+The HTML template was also checked for an accidental, standalone `html` word appearing at the top-left of the rendered page. That unwanted text was identified and removed.
+
+### 5.4 API requests returning 404
+
+The browser console initially showed requests such as:
+
+```text
+api/convert?from=USD&to=GMD&amount=1
+api/rate-history?from=USD&to=GMD
+api/popular?base=USD
+```
+
+Some application code used root-relative URLs such as `/api/convert`. Those URLs point to the website root, not the `/dalasisfx/` application path.
+
+The API worked when called through the public prefix:
+
+```text
+/dalasisfx/api/convert?from=USD&to=GMD&amount=1
+```
+
+The JavaScript was therefore updated to use relative API paths compatible with the HTML base URL.
+
+Examples of the intended paths:
+
+```javascript
+fetchJSON(`api/convert?from=${from}&to=${to}&amount=${amount}`);
+fetchJSON(`api/popular?base=${base}`);
+fetchJSON('api/history?limit=8');
+fetchJSON(`api/rate-history?from=${from}&to=${to}`);
+fetchJSON('api/refresh');
+```
+
+The actual query parameters and function signatures should match the application's existing implementation.
+
+### 5.5 Handling unexpected API responses
+
+The revised JavaScript used a helper to check HTTP status and response content type before parsing JSON.
+
+```javascript
+async function fetchJSON(url, options = {}) {
+    const response = await fetch(url, options);
+
+    if (!response.ok) {
+        throw new Error(
+            `API request failed (${response.status}): ${url}`
+        );
+    }
+
+    const contentType =
+        response.headers.get('content-type') || '';
+
+    if (!contentType.includes('application/json')) {
+        throw new Error(
+            `Expected JSON but received ${contentType || 'unknown content type'}: ${url}`
+        );
+    }
+
+    return response.json();
+}
+```
+
+This makes it easier to identify cases where an API request returns an HTML error page instead of JSON.
+
+The application’s API requests should consistently use the helper if that version of the JavaScript is the one committed and deployed.
+
+## 6. Docker Image and ACR Workflow
+
+The intended workflow for releasing an updated version of DalasiFX is:
+
+1. Update the application source code.
+2. Build a new Docker image.
+3. Push the image to ACR.
+4. Update the image reference in the existing Kubernetes Deployment YAML.
+5. Apply the YAML.
+6. Wait for the rollout and test the application.
+
+Example commands, assuming the terminal is in the directory containing the Dockerfile:
+
+```bash
+az acr login --name ghostacr77
+
+docker build -t ghostacr77.azurecr.io/dalasisfx:v3 .
+
+docker push ghostacr77.azurecr.io/dalasisfx:v3
+```
+
+**Important:** `v3` is the example release tag from the troubleshooting workflow. Confirm the image exists in ACR before deploying it. If a different tag was ultimately pushed, use that tag consistently.
+
+Useful ACR verification:
+
+```bash
+az acr repository show-tags \
+  --name ghostacr77 \
+  --repository dalasisfx \
+  --output table
+```
+
+## 7. Preferred Kubernetes Deployment Method
+
+The preferred deployment approach is to update the existing Deployment YAML and apply it, rather than changing the running Deployment using `kubectl set image`.
+
+In the existing YAML file, update only the application container's image reference:
+
+```yaml
+image: ghostacr77.azurecr.io/dalasisfx:v3
+```
+
+Keep the current Deployment's other settings unchanged, including replicas, ports, probes, environment variables, resource limits, and labels.
+
+First, locate the existing manifest:
+
+```bash
+ls
+ls k8s
+```
+
+Then apply the actual file path. For example, if the file is named `k8s/dalasisfx-deployment.yaml`:
+
+```bash
+kubectl apply -f k8s/dalasisfx-deployment.yaml
+
+kubectl rollout status deployment/dalasisfx
+```
+
+The filename above is an example. Use the real filename in the project.
+
+Check the Deployment and pods:
+
+```bash
+kubectl get deployment dalasisfx
+kubectl get pods
+kubectl describe deployment dalasisfx
+```
+
+Confirm the Deployment references the intended image before assuming the new version is live.
+
+## 8. Validation and Smoke Tests
+
+The following checks returned successful HTTP status codes during the troubleshooting work:
+
+```text
+Portfolio: 200
+DalasiFX: 200
+CSS: 200
+JavaScript: 200
+```
+
+Commands used to check those endpoints:
+
+```bash
+curl -s -o /dev/null -w "Portfolio: %{http_code}\n" \
+  http://20.22.151.118/
+
+curl -s -o /dev/null -w "DalasiFX: %{http_code}\n" \
+  http://20.22.151.118/dalasisfx/
+
+curl -s -o /dev/null -w "CSS: %{http_code}\n" \
+  http://20.22.151.118/dalasisfx/static/css/style.css
+
+curl -s -o /dev/null -w "JavaScript: %{http_code}\n" \
+  http://20.22.151.118/dalasisfx/static/js/app.js
+```
+
+The currency-conversion API was also tested:
+
+```bash
+curl -i \
+  "http://20.22.151.118/dalasisfx/api/convert?from=USD&to=GMD&amount=1"
+```
+
+The API returned HTTP `200` with JSON containing the source and target currencies, exchange rate, converted amount, and provider update time.
+
+These checks confirm that the corresponding URLs were reachable at the time of testing. They do not, by themselves, prove every JavaScript feature works correctly in the browser or that a particular new image tag was deployed.
+
+### Final browser checks
+
+After a release, verify:
+
+- The portfolio still loads at `/`.
+- DalasiFX loads at `/dalasisfx/`.
+- CSS styling and JavaScript functionality work.
+- Currency conversion returns a result.
+- Popular rates, conversion history, and rate-trend requests return JSON.
+- Browser DevTools does not show API 404 errors or JSON parsing errors.
+- The unwanted `html` text no longer appears.
+- The Deployment is running the expected image tag.
+
+## 9. Useful Troubleshooting Commands
+
+Check the Ingress resources:
+
+```bash
+kubectl get ingress
+kubectl describe ingress dalasisfx-ingress
+kubectl describe ingress ghost-apps-ingress
+```
+
+Check the middleware:
+
+```bash
+kubectl get middleware -n default
+kubectl describe middleware dalasisfx-strip-prefix -n default
+```
+
+Check the Service and its endpoints:
+
+```bash
+kubectl get service dalasisfx
+kubectl get endpoints dalasisfx
+```
+
+Check application logs:
+
+```bash
+kubectl logs deployment/dalasisfx
+```
+
+Check the current image:
+
+```bash
+kubectl get deployment dalasisfx \
+  -o jsonpath='{.spec.template.spec.containers[*].image}'
+```
+
+Check recent events if a rollout fails:
+
+```bash
+kubectl get events --sort-by=.lastTimestamp
+```
+
+## 10. Lessons Learned
+
+1. **Subpath deployments need deliberate URL handling.** An application designed for `/` can generate broken asset and API URLs when placed under `/dalasisfx/`.
+2. **Ingress routing and application URLs are separate concerns.** Traefik can route requests correctly while JavaScript still calls the wrong API path.
+3. **HTTP 200 checks are useful but not sufficient.** Browser functionality and API response content should also be checked.
+4. **Use immutable or distinct image tags for releases.** A new tag makes it easier to identify which application version is deployed.
+5. **Keep deployment configuration reproducible.** Updating and applying the existing YAML keeps the desired state in a file instead of relying on an undocumented imperative change.
+6. **Protect shared infrastructure.** The portfolio and DalasiFX can share Traefik and its public IP without creating another LoadBalancer.
+7. **Check the project directory before building.** Docker needs the correct build context and Dockerfile.
+8. **Remove accidental template text at the source.** Fixing the HTML template and deploying the corrected application image is more reliable than trying to hide unwanted text in the browser.
+
+## 11. Final State and Items to Verify
+
+### Confirmed during troubleshooting
+
+- The portfolio and DalasiFX were configured to share the existing Traefik public IP.
+- The DalasiFX Ingress and strip-prefix middleware were in place.
+- The DalasiFX page, CSS, and JavaScript URLs returned HTTP 200 during testing.
+- The conversion API returned a successful JSON response when accessed through `/dalasisfx/api/convert`.
+- A stray `html` text issue was identified and removed from the template.
+
+### Verify before treating the release as fully documented
+
+- The final image tag pushed to ACR.
+- The exact Deployment YAML filename and the image tag currently referenced by AKS.
+- Successful completion of the latest Kubernetes rollout.
+- Successful browser tests for conversion, history, popular rates, and trends after the final image was deployed.
+- That the final source changes have been committed and pushed to the intended Git repository.
+
+## 12. Recommended Release Procedure
+
+For future DalasiFX changes:
+
+1. Edit and test the Flask application locally.
+2. Confirm all static and API URLs work under `/dalasisfx/`.
+3. Commit the source changes.
+4. Build and push a new image tag to ACR.
+5. Update only the image reference in the existing Deployment YAML.
+6. Apply the YAML and wait for the rollout.
+7. Check the running image, application logs, public URLs, and browser console.
+8. Record the image tag and verification results in the project README or release notes.
+
+**Deployment principle:** Make small, verifiable changes and preserve the working AKS cluster, Traefik public IP, portfolio deployment, and existing infrastructure.

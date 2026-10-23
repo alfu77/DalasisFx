@@ -1,0 +1,13 @@
+﻿DalasiFX transfer package
+
+Windows quick start
+1. Install Python 3.9 or newer from https://www.python.org/downloads/.
+2. Extract this package to a folder.
+3. Double-click run_windows.bat. The first run creates a virtual environment and installs dependencies.
+4. Open http://127.0.0.1:5000 in a browser on that computer.
+
+The app needs an internet connection to fetch exchange rates. It creates currency_data.db automatically. Stop it with Ctrl+C in the server window.
+
+Docker option
+From the extracted folder, run: docker compose up --build
+Then open http://127.0.0.1:5000.

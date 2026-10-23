@@ -1,0 +1,243 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DalasiFX - Live Gambian Currency Converter</title>
+
+    <!-- Resolve relative assets and API requests under /dalasisfx/ -->
+    <base href="/dalasisfx/">
+
+    <link rel="stylesheet" href="static/css/style.css">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div class="app-wrapper">
+
+        <header class="app-header">
+            <div class="header-container">
+                <div class="brand">
+                    <span class="brand-flag">🇬🇲</span>
+                    <div class="brand-text">
+                        <h1>Dalasi<span>FX</span></h1>
+                        <p class="tagline">Real-Time Currency Exchange & Gambian Dalasi Tracker</p>
+                    </div>
+                </div>
+
+                <div class="header-actions">
+                    <div class="theme-switch-group" role="group" aria-label="Theme Switcher">
+                        <button type="button" id="themeWhiteBtn" class="theme-toggle-btn" title="Switch to White theme">
+                            <span class="theme-circle white-circle"></span>
+                            <span>White</span>
+                        </button>
+                        <button type="button" id="themeBlackBtn" class="theme-toggle-btn active" title="Switch to Black theme">
+                            <span class="theme-circle black-circle"></span>
+                            <span>Black</span>
+                        </button>
+                    </div>
+
+                    <div class="header-status">
+                        <span class="live-pulse"></span>
+                        <span id="headerStatusText">Live Market Rates</span>
+                        <button type="button" id="refreshRatesBtn" class="refresh-pill" title="Fetch latest rates from API">
+                            <svg class="refresh-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                            </svg>
+                            <span>Refresh</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <main class="main-container">
+
+            <section class="converter-card" id="converterSection">
+                <div class="card-header">
+                    <h2>Currency Exchange Calculator</h2>
+                    <span class="last-updated" id="lastUpdatedBadge">Checking updates...</span>
+                </div>
+
+                <div class="converter-grid">
+
+                    <div class="input-group amount-group">
+                        <label for="amountInput">Amount</label>
+                        <div class="input-field">
+                            <span class="currency-symbol-tag" id="sourceSymbol">$</span>
+                            <input type="number" id="amountInput" value="1" min="0" step="any" placeholder="0.00" inputmode="decimal">
+                        </div>
+                        <div class="preset-chips">
+                            <button type="button" class="chip" data-amount="10">10</button>
+                            <button type="button" class="chip" data-amount="50">50</button>
+                            <button type="button" class="chip" data-amount="100">100</button>
+                            <button type="button" class="chip" data-amount="500">500</button>
+                            <button type="button" class="chip" data-amount="1000">1,000</button>
+                        </div>
+                    </div>
+
+                    <div class="input-group currency-picker-group">
+                        <label>From Currency</label>
+                        <div class="custom-select" id="fromSelectContainer">
+                            <button type="button" class="select-trigger" id="fromTrigger" aria-haspopup="listbox">
+                                <span class="selected-flag" id="fromFlag">🇺🇸</span>
+                                <div class="selected-info">
+                                    <span class="selected-code" id="fromCode">USD</span>
+                                    <span class="selected-name" id="fromName">US Dollar</span>
+                                </div>
+                                <svg class="chevron" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+                            </button>
+                            <div class="dropdown-panel" id="fromDropdown">
+                                <input type="text" class="search-input" placeholder="Search code or country..." id="fromSearch">
+                                <ul class="options-list" id="fromOptions"></ul>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="swap-divider">
+                        <button type="button" id="swapCurrenciesBtn" class="swap-button" title="Swap currencies">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M7 16V4M7 4L3 8M7 4L11 8M17 8V20M17 20L21 16M17 20L13 16"/>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <div class="input-group currency-picker-group">
+                        <label>To Currency</label>
+                        <div class="custom-select" id="toSelectContainer">
+                            <button type="button" class="select-trigger" id="toTrigger" aria-haspopup="listbox">
+                                <span class="selected-flag" id="toFlag">🇬🇲</span>
+                                <div class="selected-info">
+                                    <span class="selected-code" id="toCode">GMD</span>
+                                    <span class="selected-name" id="toName">Gambian Dalasi</span>
+                                </div>
+                                <svg class="chevron" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+                            </button>
+                            <div class="dropdown-panel" id="toDropdown">
+                                <input type="text" class="search-input" placeholder="Search code or country..." id="toSearch">
+                                <ul class="options-list" id="toOptions"></ul>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <div class="conversion-result-banner" id="resultBanner">
+                    <div class="result-details">
+                        <div class="conversion-headline">
+                            <span class="base-calc" id="baseDisplay">1.00 USD =</span>
+                            <span class="converted-val" id="targetDisplay">-- GMD</span>
+                        </div>
+                        <div class="rate-indicators">
+                            <span class="rate-badge" id="exchangeRateBadge">1 USD = -- GMD</span>
+                            <span class="rate-badge inverse-badge" id="inverseRateBadge">1 GMD = -- USD</span>
+                        </div>
+                    </div>
+                    <div class="result-meta">
+                        <span class="rate-source-tag" id="rateSourceTag">Official Reference Rate</span>
+                        <span class="timestamp-label" id="rateTimestamp">Loading real-time data...</span>
+                    </div>
+                </div>
+            </section>
+
+            <section class="popular-section">
+                <div class="section-title-wrap">
+                    <h3>Popular Gambian Dalasi Pairings</h3>
+                    <p class="section-subtitle">Real-time benchmark values against major world & regional currencies</p>
+                </div>
+                <div class="cards-grid" id="popularCardsGrid">
+                    <div class="skeleton-card">Loading benchmark rates...</div>
+                </div>
+            </section>
+
+            <div class="dashboard-columns">
+
+                <section class="column-card history-card">
+                    <div class="card-top">
+                        <div class="title-with-icon">
+                            <svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                            </svg>
+                            <div>
+                                <h4>Rate History & Trends</h4>
+                                <span class="subtext" id="trendPairText">USD / GMD Snapshot History</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="chart-box" id="chartBox">
+                        <svg id="trendSvg" viewBox="0 0 500 160" preserveAspectRatio="none"></svg>
+                        <div class="chart-labels">
+                            <span id="chartMin">Min: --</span>
+                            <span id="chartAvg">Current: --</span>
+                            <span id="chartMax">Max: --</span>
+                        </div>
+                    </div>
+                    <p class="history-note">Snapshots are archived locally in SQLite on each conversion and update.</p>
+                </section>
+
+                <section class="column-card recent-card">
+                    <div class="card-top">
+                        <div class="title-with-icon">
+                            <svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <polyline points="12 6 12 12 16 14"></polyline>
+                            </svg>
+                            <div>
+                                <h4>Recent Lookups (SQLite)</h4>
+                                <span class="subtext">Your latest cached conversions</span>
+                            </div>
+                        </div>
+                        <button type="button" id="clearRecentBtn" class="subtle-btn">Refresh</button>
+                    </div>
+                    <div class="table-container">
+                        <table class="history-table">
+                            <thead>
+                                <tr>
+                                    <th>Pair</th>
+                                    <th>Amount</th>
+                                    <th>Result</th>
+                                    <th>Rate</th>
+                                </tr>
+                            </thead>
+                            <tbody id="historyTableBody">
+                                <tr><td colspan="4" class="empty-cell">No recent conversions recorded yet.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+            </div>
+
+            <aside class="market-notice">
+                <div class="notice-icon">ℹ️</div>
+                <div class="notice-content">
+                    <h5>Market Reference Rate vs. Commercial / Remittance Rates</h5>
+                    <p>
+                        Rates displayed on this dashboard reflect official interbank reference mid-market rates. Commercial banks in Banjul and money transfer operators (such as Western Union, RIA, MoneyGram, and Wave) apply their own retail margins, exchange spreads, and transaction service charges.
+                    </p>
+                </div>
+            </aside>
+
+        </main>
+
+        <footer class="app-footer">
+            <div class="footer-content">
+                <p><strong>DalasiFX</strong> &bull; Python Flask Backend &bull; SQLite Persistence &bull; Automated pytest verification</p>
+                <p class="credits">Rates powered by Open Exchange Rates API. Designed for desktop, tablet, and mobile browsers.</p>
+            </div>
+        </footer>
+
+    </div>
+
+    <script>
+        window.INITIAL_CURRENCIES = {{ currencies | tojson }};
+    </script>
+
+    <script src="static/js/app.js"></script>
+</body>
+</html>
+```

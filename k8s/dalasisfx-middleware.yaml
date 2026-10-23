@@ -1,0 +1,10 @@
+
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: dalasisfx-strip-prefix
+  namespace: default
+spec:
+  stripPrefix:
+    prefixes:
+      - /dalasisfx

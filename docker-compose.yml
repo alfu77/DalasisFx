@@ -1,0 +1,15 @@
+services:
+  dalasifx:
+    build: .
+    container_name: dalasifx_app
+    ports:
+      - "5000:5000"
+    environment:
+      CACHE_DURATION_SECONDS: "3600"
+      DATABASE_PATH: /data/currency_data.db
+    volumes:
+      - dalasifx_data:/data
+    restart: unless-stopped
+
+volumes:
+  dalasifx_data:

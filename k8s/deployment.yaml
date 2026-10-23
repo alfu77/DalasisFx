@@ -1,0 +1,28 @@
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dalasisfx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dalasisfx
+  template:
+    metadata:
+      labels:
+        app: dalasisfx
+    spec:
+      containers:
+        - name: dalasisfx
+          image: ghostacr77.azurecr.io/dalasisfx:v3
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5000
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
